@@ -43,5 +43,9 @@ app.include_router(dashboard.router)
 def home():
     return {
         "status": "running",
-        "message": "LGU-TLDC Predictive Analytics API is running."
+        "service": "LGU-TLDC Predictive Analytics API",
+        "message": "LGU-TLDC Predictive Analytics API is running.",
+        "version": "1.0.0",
+        "model": "Random Forest",
+        "deployment": "Vercel"
     }
