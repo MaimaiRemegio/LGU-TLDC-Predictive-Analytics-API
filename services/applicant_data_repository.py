@@ -9,6 +9,14 @@ from pathlib import Path
 
 import pandas as pd
 
+from services.completion_model_config import (
+    DATA_RELIABILITY_LIMITED,
+    DATA_RELIABILITY_RELIABLE,
+    GRADUATE_LABEL,
+    HISTORICAL_SUPPORTING_EVIDENCE_LABEL,
+    MIN_HISTORICAL_APPLICANTS_FOR_RELIABILITY,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET_PATH = PROJECT_ROOT / "datasets" / "historical_training.csv"
 
@@ -129,6 +137,76 @@ class ApplicantDataRepository:
             "learner_classification_distribution": self._build_distribution(
                 records, "learner_classification"
             ),
+        }
+
+    def _count_graduates(self, records: pd.DataFrame) -> int:
+        return int((records["training_outcome"] == GRADUATE_LABEL).sum())
+
+    def _assess_data_reliability(self, applicant_count: int) -> str:
+        if applicant_count < MIN_HISTORICAL_APPLICANTS_FOR_RELIABILITY:
+            return DATA_RELIABILITY_LIMITED
+        return DATA_RELIABILITY_RELIABLE
+
+    def get_barangay_historical_supporting_evidence_for_course(
+        self, course_applied: str
+    ) -> dict[str, dict]:
+        """
+        Return per-barangay historical statistics for the selected course.
+
+        All values are labeled as supporting evidence and are not used by the
+        Random Forest to compute the AI Recommendation Score.
+        """
+        records = self.get_records_for_course(course_applied)
+        total_applicants = len(records)
+
+        if total_applicants == 0:
+            return {}
+
+        evidence_by_barangay: dict[str, dict] = {}
+
+        for barangay, barangay_records in records.groupby("barangay"):
+            barangay_name = str(barangay)
+            applicant_count = len(barangay_records)
+            graduates = self._count_graduates(barangay_records)
+            dropouts = applicant_count - graduates
+
+            completion_percentage = (
+                round((graduates / applicant_count) * 100, 1)
+                if applicant_count > 0
+                else 0.0
+            )
+            dropout_percentage = (
+                round((dropouts / applicant_count) * 100, 1)
+                if applicant_count > 0
+                else 0.0
+            )
+            participation_percentage = round((applicant_count / total_applicants) * 100, 1)
+
+            evidence_by_barangay[barangay_name] = {
+                "label": HISTORICAL_SUPPORTING_EVIDENCE_LABEL,
+                "historical_participation_percentage": participation_percentage,
+                "historical_completion_percentage": completion_percentage,
+                "historical_dropout_percentage": dropout_percentage,
+                "historical_applicant_count": int(applicant_count),
+                "data_reliability": self._assess_data_reliability(applicant_count),
+            }
+
+        return evidence_by_barangay
+
+    def get_barangay_participation_for_course(self, course_applied: str) -> dict[str, dict]:
+        """
+        Return course-specific historical applicant counts and participation
+        percentages for every barangay in the dataset.
+        """
+        evidence = self.get_barangay_historical_supporting_evidence_for_course(course_applied)
+
+        return {
+            barangay: {
+                "historical_applicants": stats["historical_applicant_count"],
+                "historical_participation_percentage": stats["historical_participation_percentage"],
+                "data_reliability": stats["data_reliability"],
+            }
+            for barangay, stats in evidence.items()
         }
 
 

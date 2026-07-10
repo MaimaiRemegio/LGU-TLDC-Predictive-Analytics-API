@@ -12,15 +12,59 @@ import pandas as pd
 
 random.seed(42)
 
-RECORD_COUNT = 5000
+RECORD_COUNT = 8000
 OUTPUT_PATH = Path(__file__).resolve().parents[1] / "datasets" / "historical_training.csv"
 
-BARANGAYS = [
-    "Abuanan", "Alianza", "Atipuluan", "Bacong", "Bagroy", "Balingasag",
-    "Binubuhan", "Busay", "Calumangan", "Caridad", "Dulao", "Ilijan",
-    "Lag-asan", "Ma-ao", "Mailum", "Malingin", "Napoles", "Pacol",
-    "Poblacion", "Sagasa", "Tabunan", "Taloc",
-]
+# Per-barangay attributes that drive realistic, learnable relationships:
+#   tier          -> workforce/education skew (urban areas skew to higher education)
+#   participation -> relative applicant volume (weighted sampling, non-uniform)
+#   completion    -> additive graduation-probability modifier (accessibility, support,
+#                    proximity to the training center). Higher = more completions,
+#                    lower = more dropouts.
+BARANGAY_PROFILES = {
+    "Poblacion":   {"tier": "urban",      "participation": 2.0, "completion": 0.14},
+    "Abuanan":     {"tier": "urban",      "participation": 2.3, "completion": 0.13},
+    "Atipuluan":   {"tier": "urban",      "participation": 2.2, "completion": 0.12},
+    "Lag-asan":    {"tier": "urban",      "participation": 1.4, "completion": 0.12},
+    "Balingasag":  {"tier": "urban",      "participation": 1.3, "completion": 0.11},
+    "Taloc":       {"tier": "peri-urban", "participation": 1.8, "completion": 0.05},
+    "Calumangan":  {"tier": "peri-urban", "participation": 1.4, "completion": 0.04},
+    "Dulao":       {"tier": "peri-urban", "participation": 1.3, "completion": 0.06},
+    "Napoles":     {"tier": "peri-urban", "participation": 1.0, "completion": 0.03},
+    "Bacong":      {"tier": "peri-urban", "participation": 1.1, "completion": 0.02},
+    "Alianza":     {"tier": "peri-urban", "participation": 1.1, "completion": 0.02},
+    "Caridad":     {"tier": "peri-urban", "participation": 1.0, "completion": 0.00},
+    "Pacol":       {"tier": "peri-urban", "participation": 0.9, "completion": -0.02},
+    "Malingin":    {"tier": "peri-urban", "participation": 0.9, "completion": -0.04},
+    "Ma-ao":       {"tier": "rural",      "participation": 1.2, "completion": -0.12},
+    "Bagroy":      {"tier": "rural",      "participation": 0.7, "completion": -0.14},
+    "Tabunan":     {"tier": "rural",      "participation": 0.6, "completion": -0.16},
+    "Busay":       {"tier": "rural",      "participation": 0.6, "completion": -0.18},
+    "Binubuhan":   {"tier": "rural",      "participation": 0.5, "completion": -0.19},
+    "Sagasa":      {"tier": "rural",      "participation": 0.5, "completion": -0.20},
+    "Ilijan":      {"tier": "rural",      "participation": 0.5, "completion": -0.22},
+    "Mailum":      {"tier": "rural",      "participation": 0.6, "completion": -0.24},
+}
+
+BARANGAYS = list(BARANGAY_PROFILES)
+
+# Education distribution multipliers by barangay tier. Urban barangays skew toward
+# higher educational attainment; rural barangays skew lower. Applied on top of the
+# career-driven base distribution, then renormalized by weighted_choice.
+TIER_EDUCATION_BIAS = {
+    "urban": {
+        "Elementary Graduate": 0.6, "Junior High": 0.8, "Senior High": 1.0,
+        "College Undergraduate": 1.3, "College Graduate": 1.5,
+    },
+    "peri-urban": {
+        "Elementary Graduate": 1.0, "Junior High": 1.0, "Senior High": 1.0,
+        "College Undergraduate": 1.0, "College Graduate": 1.0,
+    },
+    "rural": {
+        "Elementary Graduate": 1.5, "Junior High": 1.3, "Senior High": 1.0,
+        "College Undergraduate": 0.7, "College Graduate": 0.5,
+    },
+}
 
 SEXES = ["Male", "Female"]
 EMPLOYMENT_STATUSES = ["Unemployed", "Self-employed", "Wage Employed", "Underemployed"]
@@ -121,15 +165,18 @@ EDUCATION_AGE_RANGES = {
     "College Graduate": (22, 55),
 }
 
+# Base completion rates are kept in a mid range (not near 1.0) so that the
+# barangay completion modifier is not lost to the [0.15, 0.95] clamp. This keeps
+# per-barangay differences visible and learnable.
 COURSE_COMPLETION_BASE = {
-    "Cookery NC II": 0.78,
-    "Bread and Pastry NC II": 0.76,
-    "Driving NC II": 0.72,
-    "Carpentry NC II": 0.68,
-    "Masonry NC II": 0.65,
-    "Computer Systems Servicing NC II": 0.62,
-    "Shielded Metal Arc Welding NC I": 0.60,
-    "Electrical Installation and Maintenance NC II": 0.58,
+    "Cookery NC II": 0.70,
+    "Bread and Pastry NC II": 0.68,
+    "Driving NC II": 0.64,
+    "Carpentry NC II": 0.60,
+    "Masonry NC II": 0.57,
+    "Computer Systems Servicing NC II": 0.54,
+    "Shielded Metal Arc Welding NC I": 0.52,
+    "Electrical Installation and Maintenance NC II": 0.50,
 }
 
 EDUCATION_COMPLETION_ADJUSTMENT = {
@@ -176,8 +223,13 @@ def generate_desired_career(current_skill: str) -> str:
     return SKILL_TO_CAREER[current_skill]
 
 
-def generate_educational_attainment(desired_career: str) -> str:
-    return weighted_choice(CAREER_TO_EDUCATION[desired_career])
+def generate_educational_attainment(desired_career: str, tier: str) -> str:
+    base_distribution = CAREER_TO_EDUCATION[desired_career]
+    tier_bias = TIER_EDUCATION_BIAS[tier]
+    biased = [
+        (level, weight * tier_bias[level]) for level, weight in base_distribution
+    ]
+    return weighted_choice(biased)
 
 
 def generate_employment_status(educational_attainment: str) -> str:
@@ -231,7 +283,8 @@ def generate_learner_classification(
 
 
 def generate_barangay() -> str:
-    return random.choice(BARANGAYS)
+    weights = [BARANGAY_PROFILES[barangay]["participation"] for barangay in BARANGAYS]
+    return random.choices(BARANGAYS, weights=weights, k=1)[0]
 
 
 def compute_graduation_probability(
@@ -241,11 +294,13 @@ def compute_graduation_probability(
     employment_status: str,
     current_skill: str,
     learner_classification: str,
+    barangay: str,
 ) -> float:
     probability = COURSE_COMPLETION_BASE[course_applied]
     probability += EDUCATION_COMPLETION_ADJUSTMENT[educational_attainment]
     probability += LEARNER_COMPLETION_ADJUSTMENT[learner_classification]
     probability += EMPLOYMENT_COMPLETION_ADJUSTMENT[employment_status]
+    probability += BARANGAY_PROFILES[barangay]["completion"]
 
     if SKILL_TO_COURSE[current_skill] == course_applied:
         probability += 0.10
@@ -267,6 +322,7 @@ def generate_training_outcome(
     employment_status: str,
     current_skill: str,
     learner_classification: str,
+    barangay: str,
 ) -> str:
     graduate_probability = compute_graduation_probability(
         course_applied,
@@ -275,15 +331,18 @@ def generate_training_outcome(
         employment_status,
         current_skill,
         learner_classification,
+        barangay,
     )
     return "Graduate" if random.random() < graduate_probability else "Dropout"
 
 
 def generate_record() -> dict:
+    barangay = generate_barangay()
+    tier = BARANGAY_PROFILES[barangay]["tier"]
     current_skill = generate_current_skill()
     course_applied = generate_course_applied(current_skill)
     desired_career = generate_desired_career(current_skill)
-    educational_attainment = generate_educational_attainment(desired_career)
+    educational_attainment = generate_educational_attainment(desired_career, tier)
     employment_status = generate_employment_status(educational_attainment)
     age = generate_age(educational_attainment)
     sex = generate_sex(current_skill)
@@ -293,7 +352,6 @@ def generate_record() -> dict:
         educational_attainment,
         employment_status,
     )
-    barangay = generate_barangay()
     training_outcome = generate_training_outcome(
         course_applied,
         age,
@@ -301,6 +359,7 @@ def generate_record() -> dict:
         employment_status,
         current_skill,
         learner_classification,
+        barangay,
     )
 
     return {

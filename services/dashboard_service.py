@@ -36,9 +36,9 @@ class DashboardService:
         forecast_next_month = forecast_result["monthly_forecast"][0]
 
         insights = [
-            f"{best['barangay']} has the highest predicted suitability ({best['completion_probability']}%).",
+            f"{best['barangay']} has the highest predicted completion probability ({best['completion_probability']}%).",
             f"Expected applicants next month: {forecast_next_month}.",
-            f"{len([b for b in ranking if b['completion_probability'] >= 10])} barangays have suitability probabilities above 10%.",
+            f"{len([b for b in ranking if b['completion_probability'] >= 80])} barangays have predicted completion probabilities above 80%.",
             f"Recommended priority areas: {', '.join([b['barangay'] for b in top3])}."
         ]
 
