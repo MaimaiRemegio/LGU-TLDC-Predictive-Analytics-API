@@ -88,15 +88,26 @@ def prepare_data(
 
 def train_model(x_train: pd.DataFrame, y_train: pd.Series) -> RandomForestClassifier:
     """
-    Train a Random Forest classifier on the training split.
+    Train a compact Random Forest classifier on the training split.
 
-    min_samples_leaf regularizes the trees so predict_proba outputs are
-    well-calibrated completion probabilities.
+    Hyperparameters are chosen to keep completion_model.pkl well below
+    GitHub's 100 MB limit while preserving predictive performance:
+
+    - n_estimators=100: fewer trees than 300; each tree is stored in the
+      pickle, so this is the main size reduction.
+    - max_depth=10: caps tree growth so each tree stores fewer nodes.
+    - min_samples_leaf=50: keeps leaves large (better-calibrated
+      predict_proba) and further limits node count.
+    - max_features="sqrt": considers fewer features per split, which
+      tends to produce slightly smaller trees without hurting accuracy.
     """
     model = RandomForestClassifier(
-        n_estimators=300,
+        n_estimators=100,
+        max_depth=10,
         min_samples_leaf=50,
+        max_features="sqrt",
         random_state=RANDOM_STATE,
+        n_jobs=-1,
     )
     model.fit(x_train, y_train)
     return model
@@ -200,17 +211,21 @@ def save_artifacts(
         raise TypeError("label_encoders must be a dictionary of fitted LabelEncoders.")
 
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, MODEL_PATH)
+    # compress=3 shrinks the pickle substantially with negligible load-time cost.
+    joblib.dump(model, MODEL_PATH, compress=3)
 
     if ENCODERS_PATH.exists():
         ENCODERS_PATH.unlink()
-    joblib.dump(label_encoders, ENCODERS_PATH)
+    joblib.dump(label_encoders, ENCODERS_PATH, compress=3)
 
     save_json(metrics, METRICS_PATH)
     save_json(feature_importance, FEATURE_IMPORTANCE_PATH)
 
+    model_size_mb = MODEL_PATH.stat().st_size / (1024 * 1024)
+
     print("Artifacts saved:")
     print(f"  Model:              {MODEL_PATH.resolve()}")
+    print(f"  Model file size:    {model_size_mb:.2f} MB")
     print(f"  Encoders:           {ENCODERS_PATH.resolve()}")
     print(f"  Validation metrics: {METRICS_PATH.resolve()}")
     print(f"  Feature importance: {FEATURE_IMPORTANCE_PATH.resolve()}")
@@ -232,12 +247,29 @@ def main() -> None:
     feature_importance = compute_feature_importance(model)
 
     print_validation_summary(metrics)
-    print("\nTop 5 Influential Features:")
+    print("\nClassification Report:")
+    print(
+        classification_report(
+            y_test,
+            model.predict(x_test),
+            target_names=label_encoders[TARGET_COLUMN].classes_,
+            zero_division=0,
+        )
+    )
+    print("Top 5 Influential Features:")
     for item in feature_importance[:5]:
         print(f"  {item['display_name']}: {item['importance']:.4f}")
 
     save_artifacts(model, label_encoders, metrics, feature_importance)
-    print("\nBarangay recommendation model trained successfully.")
+
+    model_size_mb = MODEL_PATH.stat().st_size / (1024 * 1024)
+    print(f"\nModel file size: {model_size_mb:.2f} MB")
+    if model_size_mb >= 100:
+        raise RuntimeError(
+            f"Model file is {model_size_mb:.2f} MB and still exceeds GitHub's 100 MB limit."
+        )
+
+    print("Barangay recommendation model trained successfully.")
 
 
 if __name__ == "__main__":
