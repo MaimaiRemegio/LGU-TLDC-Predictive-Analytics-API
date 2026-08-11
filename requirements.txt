@@ -18,7 +18,12 @@ numpy==2.5.0
 # and LabelEncoder objects from trained_models/*.pkl
 scikit-learn==1.9.0
 joblib==1.5.3
+PyMySQL==1.1.2
+python-dotenv==1.1.1
 
 # ARIMA forecast models are loaded via joblib and call .forecast();
 # statsmodels must be present to deserialize and run those models.
 statsmodels==0.14.6
+
+# Test runner for chronological backtesting unit tests
+pytest==8.4.2
