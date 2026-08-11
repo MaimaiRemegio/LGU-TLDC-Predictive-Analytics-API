@@ -1,12 +1,16 @@
 """
 Data access layer for the Applicant Volume Forecasting module.
 
-Uses event-level applicant registration history:
+Raw source: datasets/applicant_volume_history.csv
+  Columns: application_date, barangay, course_applied
 
-    application_date, barangay, course_applied
+The ARIMA forecasting pipeline aggregates across ALL barangays and groups
+by course, producing one time series per course:
 
-ARIMA forecasting never reads historical_training.csv. That file belongs
-to the Barangay Recommendation Random Forest pipeline.
+    GROUP BY date, course  →  SUM(applicant_count) AS total_applications
+
+Barangay data is preserved for descriptive profile panels only.
+ARIMA never receives a per-barangay series.
 
 This repository is intentionally CSV-backed today. A future MySQL
 implementation can provide the same methods from the TLDC applicants
@@ -61,12 +65,19 @@ class BarangayNotFoundError(ValueError):
     """Raised when a requested barangay is not present in registration history."""
 
 
+class CourseNotFoundError(ValueError):
+    """Raised when a requested course is not present in registration history."""
+
+
 class ForecastingRepository:
     """
     Repository for chronological applicant registration events.
 
     Each record represents one application. Forecasting services aggregate
-    these events by day, week, or month before fitting ARIMA models.
+    these events by week or month before fitting ARIMA models.
+
+    ARIMA input: course-level total_applications (all barangays summed).
+    Barangay data is retained only for descriptive profile panels.
     """
 
     def __init__(
@@ -122,6 +133,10 @@ class ForecastingRepository:
             return pd.DataFrame()
         return dataframe
 
+    # ------------------------------------------------------------------
+    # Basic accessors
+    # ------------------------------------------------------------------
+
     def get_demographic_profiles(self) -> pd.DataFrame:
         """Return descriptive applicant attribute records (not used by ARIMA)."""
         return self._demographic_profiles
@@ -148,6 +163,10 @@ class ForecastingRepository:
         counts = self._registrations[BARANGAY_COLUMN].value_counts()
         return {str(barangay): int(count) for barangay, count in counts.items()}
 
+    # ------------------------------------------------------------------
+    # Barangay helpers (descriptive only — NOT used by ARIMA)
+    # ------------------------------------------------------------------
+
     def get_available_barangays(self) -> list[str]:
         """Return barangays present in the registration history."""
         return sorted(self._registrations[BARANGAY_COLUMN].unique().tolist())
@@ -161,6 +180,126 @@ class ForecastingRepository:
                 f"Available barangays: {', '.join(sorted(available))}"
             )
         return barangay
+
+    def get_registrations_for_barangay(self, barangay: str) -> pd.DataFrame:
+        """Return raw registration events for one barangay (read-only view)."""
+        self.validate_barangay(barangay)
+        return self._registrations[
+            self._registrations[BARANGAY_COLUMN] == barangay
+        ]
+
+    def get_current_applicant_count(self, barangay: str, frequency: str = "M") -> int:
+        """Return the most recent period's applicant total for a barangay."""
+        series = self.get_barangay_series(barangay, frequency=frequency)
+        if series.empty:
+            return 0
+        return int(round(float(series.iloc[-1])))
+
+    def get_barangay_series(
+        self,
+        barangay: str,
+        frequency: str = "M",
+    ) -> pd.Series:
+        """
+        Return a continuous applicant-count series for one barangay.
+
+        Used only for descriptive barangay profile panels.
+        ARIMA forecasting must use get_course_series() instead.
+        """
+        self.validate_barangay(barangay)
+        freq = self._normalize_frequency(frequency)
+        pandas_freq = PANDAS_FREQUENCY[freq]
+
+        records = self._registrations[
+            self._registrations[BARANGAY_COLUMN] == barangay
+        ]
+        if records.empty:
+            return pd.Series(dtype=float)
+
+        series = (
+            records.set_index(APPLICATION_DATE_COLUMN)[COURSE_COLUMN]
+            .resample(pandas_freq)
+            .size()
+            .astype(float)
+            .rename(COUNT_COLUMN)
+        )
+        return series.asfreq(pandas_freq, fill_value=0.0)
+
+    # ------------------------------------------------------------------
+    # Course-level series — PRIMARY ARIMA INPUT
+    # ------------------------------------------------------------------
+
+    def get_available_courses(self) -> list[str]:
+        """Return courses present in the registration history."""
+        return sorted(self._registrations[COURSE_COLUMN].unique().tolist())
+
+    def validate_course(self, course: str) -> str:
+        """Raise CourseNotFoundError when the course is unknown."""
+        available = set(self.get_available_courses())
+        if course not in available:
+            raise CourseNotFoundError(
+                f"Unknown course '{course}'. "
+                f"Available courses: {', '.join(sorted(available))}"
+            )
+        return course
+
+    def get_course_series(
+        self,
+        course: str,
+        frequency: str = "M",
+    ) -> pd.Series:
+        """
+        Return total applicant counts for one course, summed across ALL barangays.
+
+        This is the primary ARIMA input series:
+            GROUP BY date  →  COUNT(*) AS total_applications
+        for the given course only (barangay dimension is dropped).
+
+        frequency: W (weekly) or M (monthly, default)
+        """
+        self.validate_course(course)
+        freq = self._normalize_frequency(frequency)
+        pandas_freq = PANDAS_FREQUENCY[freq]
+
+        records = self._registrations[
+            self._registrations[COURSE_COLUMN] == course
+        ]
+        if records.empty:
+            return pd.Series(dtype=float)
+
+        series = (
+            records.set_index(APPLICATION_DATE_COLUMN)[BARANGAY_COLUMN]
+            .resample(pandas_freq)
+            .size()
+            .astype(float)
+            .rename(COUNT_COLUMN)
+        )
+        return series.asfreq(pandas_freq, fill_value=0.0)
+
+    # ------------------------------------------------------------------
+    # TLDC-wide series (all courses, all barangays)
+    # ------------------------------------------------------------------
+
+    def get_tldc_series(self, frequency: str = "M") -> pd.Series:
+        """Return organisation-wide applicant counts at the requested frequency."""
+        freq = self._normalize_frequency(frequency)
+        pandas_freq = PANDAS_FREQUENCY[freq]
+
+        if self._registrations.empty:
+            return pd.Series(dtype=float)
+
+        series = (
+            self._registrations.set_index(APPLICATION_DATE_COLUMN)[COURSE_COLUMN]
+            .resample(pandas_freq)
+            .size()
+            .astype(float)
+            .rename(COUNT_COLUMN)
+        )
+        return series.asfreq(pandas_freq, fill_value=0.0)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _normalize_frequency(self, frequency: str) -> AggregationFrequency:
         if frequency not in FREQUENCY_ALIASES:
@@ -179,10 +318,7 @@ class ForecastingRepository:
         """
         Aggregate registration events into applicant counts over time.
 
-        frequency:
-          - D / day: daily counts
-          - W / week: weekly counts
-          - M / month: monthly counts
+        Used by descriptive statistics only — not by ARIMA.
         """
         freq = self._normalize_frequency(frequency)
         pandas_freq = PANDAS_FREQUENCY[freq]
@@ -219,62 +355,6 @@ class ForecastingRepository:
             .sort_values([BARANGAY_COLUMN, APPLICATION_DATE_COLUMN])
             .reset_index(drop=True)
         )
-
-    def get_barangay_series(
-        self,
-        barangay: str,
-        frequency: str = "M",
-    ) -> pd.Series:
-        """Return a continuous applicant-count series for one barangay."""
-        self.validate_barangay(barangay)
-        freq = self._normalize_frequency(frequency)
-        pandas_freq = PANDAS_FREQUENCY[freq]
-
-        records = self._registrations[
-            self._registrations[BARANGAY_COLUMN] == barangay
-        ]
-        if records.empty:
-            return pd.Series(dtype=float)
-
-        series = (
-            records.set_index(APPLICATION_DATE_COLUMN)[COURSE_COLUMN]
-            .resample(pandas_freq)
-            .size()
-            .astype(float)
-            .rename(COUNT_COLUMN)
-        )
-        return series.asfreq(pandas_freq, fill_value=0.0)
-
-    def get_tldc_series(self, frequency: str = "M") -> pd.Series:
-        """Return organization-wide applicant counts at the requested frequency."""
-        freq = self._normalize_frequency(frequency)
-        pandas_freq = PANDAS_FREQUENCY[freq]
-
-        if self._registrations.empty:
-            return pd.Series(dtype=float)
-
-        series = (
-            self._registrations.set_index(APPLICATION_DATE_COLUMN)[COURSE_COLUMN]
-            .resample(pandas_freq)
-            .size()
-            .astype(float)
-            .rename(COUNT_COLUMN)
-        )
-        return series.asfreq(pandas_freq, fill_value=0.0)
-
-    def get_current_applicant_count(self, barangay: str, frequency: str = "M") -> int:
-        """Return the most recent period's applicant total for a barangay."""
-        series = self.get_barangay_series(barangay, frequency=frequency)
-        if series.empty:
-            return 0
-        return int(round(float(series.iloc[-1])))
-
-    def get_registrations_for_barangay(self, barangay: str) -> pd.DataFrame:
-        """Return raw registration events for one barangay (read-only view)."""
-        self.validate_barangay(barangay)
-        return self._registrations[
-            self._registrations[BARANGAY_COLUMN] == barangay
-        ]
 
 
 _repository: ForecastingRepository | None = None
