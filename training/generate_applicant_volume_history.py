@@ -1,5 +1,12 @@
 """
-Generate a synthetic monthly applicant-volume dataset for TLDC forecasting.
+Generate a synthetic DAILY applicant-volume dataset for TLDC forecasting.
+
+IMPORTANT — SYNTHETIC DATA NOTICE
+-----------------------------------
+All values are synthetically generated for prototype / capstone development
+only.  They do NOT represent actual TESDA or TLDC applicant records.
+When real TLDC data becomes available the model must be retrained on actual
+historical records.
 
 Output
 ------
@@ -7,21 +14,28 @@ datasets/applicant_volume.csv
 
 Columns
 -------
-application_date  : first day of the month (YYYY-MM-DD)
-course_applied    : TESDA course name
-total_applications: total applicants for that course across ALL barangays
+date            : calendar date (YYYY-MM-DD)
+course          : exact TESDA course name (canonical 21-course list)
+applicant_count : synthetic daily applicants for that course (0–10, integer)
 
 Coverage
 --------
-January 2021 – December 2025  →  60 months × 8 courses = 480 rows
+January 1 2021 – December 31 2025
+  1,826 days × 21 courses = 38,346 rows
 
-Design notes
-------------
-- Barangay is NOT a column.  total_applications is already aggregated
-  across all barangays, so ARIMA trains on organisation-wide volume.
-- Realistic seasonality, long-term trends, course demand differences,
-  and moderate random variation are baked in.
-- Fixed random seed guarantees reproducible output.
+Design
+------
+- Each course has a distinct demand profile (average daily applicant rate).
+- Daily counts are drawn from a Poisson distribution so that:
+    - The expected value per day reflects the course demand level.
+    - Values are naturally non-negative integers.
+    - The maximum per cell is capped at 10.
+- Weekend effect: Saturday/Sunday have 40 % lower expected counts.
+- Monthly seasonality multipliers reduce/increase the expected count
+  through the year (same pattern as before — Jan/Feb and Jul/Aug peaks).
+- Mild annual growth trend is applied.
+- Fixed random seed (42) guarantees reproducible output.
+- No barangay column.
 """
 
 from __future__ import annotations
@@ -40,36 +54,95 @@ OUTPUT_PATH = PROJECT_ROOT / "datasets" / "applicant_volume.csv"
 # Constants
 # ---------------------------------------------------------------------------
 RANDOM_SEED = 42
+START_DATE = "2021-01-01"
+END_DATE = "2025-12-31"
 
-START_YEAR = 2021
-END_YEAR = 2025
+DATE_COLUMN = "date"
+COURSE_COLUMN = "course"
+COUNT_COLUMN = "applicant_count"
 
-APPLICATION_DATE_COLUMN = "application_date"
-COURSE_COLUMN = "course_applied"
-COUNT_COLUMN = "total_applications"
+MAX_DAILY_COUNT = 10          # Hard cap per requirement
+WEEKEND_FACTOR = 0.6          # Sat/Sun have 60% of weekday expected rate
 
-# Each course: (base_monthly_volume, annual_growth_rate, noise_std_fraction)
-# base_monthly_volume  – approximate total TLDC-wide applicants per month
-# annual_growth_rate   – fractional year-on-year trend  (+0.05 = +5 % p.a.)
-# noise_std_fraction   – noise as a fraction of the base (controls variability)
-COURSE_PROFILES: dict[str, tuple[float, float, float]] = {
-    "Cookery NC II":                                 (420.0,  0.06, 0.10),
-    "Bread and Pastry NC II":                        (310.0,  0.04, 0.10),
-    "Computer Systems Servicing NC II":              (280.0,  0.08, 0.12),
-    "Carpentry NC II":                               (200.0,  0.03, 0.13),
-    "Masonry NC II":                                 (180.0,  0.02, 0.13),
-    "Shielded Metal Arc Welding NC I":               (170.0,  0.03, 0.12),
-    "Electrical Installation and Maintenance NC II": (190.0,  0.05, 0.11),
-    "Driving NC II":                                 (230.0,  0.04, 0.10),
+# ---------------------------------------------------------------------------
+# Canonical 21-course list
+# These strings are the exact identifiers used in the TLDC database.
+# Do NOT modify, abbreviate, or rename them.
+# ---------------------------------------------------------------------------
+CANONICAL_COURSES: list[str] = [
+    "Bookkeeping NC II",
+    "Computer Systems Servicing NC II",
+    "Carpentry NC II",
+    "Construction Painting NC II",
+    "Cookery NC II",
+    "Driving NC II",
+    "Electrical Installation and Maintenance NC II",
+    "Electronic Products Assembly and Servicing NC II",
+    "HEO (Bulldozer) NC II",
+    "HEO (Forklift) NC II",
+    "HEO (Hydraulic Excavator) NC II",
+    "HEO (Wheel Loader) NC II",
+    "Landscape Installation and Maintenance (Softscape)",
+    "Organic Agriculture Production NC II",
+    "Machining NC I",
+    "Machining NC II",
+    "Masonry NC I",
+    "Masonry NC II",
+    "Shielded Metal Arc Welding NC I",
+    "Shielded Metal Arc Welding NC II",
+    "Trainers Methodology Level I",
+]
+
+assert len(CANONICAL_COURSES) == 21
+assert len(set(CANONICAL_COURSES)) == 21
+
+# ---------------------------------------------------------------------------
+# Course demand profiles
+#
+# Each entry: (base_daily_rate, annual_growth_rate)
+#
+#   base_daily_rate   average applicants per WEEKDAY at the start of 2021
+#                     Calibrated so monthly totals stay realistic (daily × 22
+#                     working days ≈ monthly total).
+#                     Scaled so MAX daily Poisson draw ≤ 10 is achievable.
+#   annual_growth_rate fractional year-on-year trend
+#
+# Poisson λ is clipped to ≤ 9 so that P(X > 10) ≈ 0 and the cap at 10
+# almost never fires.
+# ---------------------------------------------------------------------------
+COURSE_PROFILES: dict[str, tuple[float, float]] = {
+    "Bookkeeping NC II":                                (4.5, 0.06),
+    "Computer Systems Servicing NC II":                 (5.0, 0.08),
+    "Carpentry NC II":                                  (3.5, 0.03),
+    "Construction Painting NC II":                      (2.5, 0.03),
+    "Cookery NC II":                                    (6.5, 0.06),
+    "Driving NC II":                                    (6.0, 0.05),
+    "Electrical Installation and Maintenance NC II":    (3.8, 0.05),
+    "Electronic Products Assembly and Servicing NC II": (3.0, 0.07),
+    "HEO (Bulldozer) NC II":                            (1.5, 0.04),
+    "HEO (Forklift) NC II":                             (1.8, 0.04),
+    "HEO (Hydraulic Excavator) NC II":                  (1.6, 0.04),
+    "HEO (Wheel Loader) NC II":                         (1.7, 0.04),
+    "Landscape Installation and Maintenance (Softscape)":(2.0, 0.03),
+    "Organic Agriculture Production NC II":             (2.3, 0.04),
+    "Machining NC I":                                   (2.0, 0.03),
+    "Machining NC II":                                  (1.8, 0.03),
+    "Masonry NC I":                                     (2.5, 0.02),
+    "Masonry NC II":                                    (2.8, 0.02),
+    "Shielded Metal Arc Welding NC I":                  (2.8, 0.03),
+    "Shielded Metal Arc Welding NC II":                 (2.6, 0.03),
+    "Trainers Methodology Level I":                     (1.0, 0.05),
 }
 
-# Monthly seasonality multipliers (index 0 = January … index 11 = December).
-# Peak enrolment in Jan/Feb (post-holiday) and Jul/Aug (mid-year intake).
+assert set(COURSE_PROFILES.keys()) == set(CANONICAL_COURSES)
+
+# Monthly seasonality multipliers (index 0 = Jan … 11 = Dec)
 SEASONAL_MULTIPLIERS = np.array(
-    [1.15, 1.10, 1.00, 0.95, 0.90, 0.92,
-     1.08, 1.12, 1.00, 0.95, 0.90, 1.05],
+    [1.15, 1.10, 1.02, 0.93, 0.90, 0.94,
+     1.08, 1.12, 1.00, 0.94, 0.91, 1.06],
     dtype=float,
 )
+assert len(SEASONAL_MULTIPLIERS) == 12
 
 
 # ---------------------------------------------------------------------------
@@ -77,78 +150,101 @@ SEASONAL_MULTIPLIERS = np.array(
 # ---------------------------------------------------------------------------
 
 def build_dataset(seed: int = RANDOM_SEED) -> pd.DataFrame:
-    """Return a 480-row DataFrame of monthly TLDC applicant volumes per course."""
+    """
+    Return a daily applicant-count DataFrame.
+
+    Each (date, course) pair has applicant_count in [0, 10].
+    """
     rng = np.random.default_rng(seed)
 
-    dates = pd.date_range(
-        start=f"{START_YEAR}-01-01",
-        end=f"{END_YEAR}-12-01",
-        freq="MS",
-    )  # 60 monthly periods
+    dates = pd.date_range(start=START_DATE, end=END_DATE, freq="D")
+    start_year = dates[0].year
 
     rows: list[dict] = []
 
-    for course, (base, growth_rate, noise_frac) in COURSE_PROFILES.items():
-        for date in dates:
-            # Years elapsed since the start of the series (fractional).
-            years_elapsed = (date.year - START_YEAR) + (date.month - 1) / 12.0
+    for course in CANONICAL_COURSES:
+        base_rate, growth_rate = COURSE_PROFILES[course]
 
-            # Long-term trend component.
-            trend = base * ((1.0 + growth_rate) ** years_elapsed)
+        for date in dates:
+            # Years elapsed since start (fractional).
+            years_elapsed = (
+                (date.year - start_year) + (date.month - 1) / 12.0
+            )
+
+            # Trend component.
+            trend_rate = base_rate * ((1.0 + growth_rate) ** years_elapsed)
 
             # Seasonal component.
-            seasonal = trend * SEASONAL_MULTIPLIERS[date.month - 1]
+            seasonal_rate = trend_rate * SEASONAL_MULTIPLIERS[date.month - 1]
 
-            # Random noise (normal, clamped to keep values positive).
-            noise = rng.normal(loc=0.0, scale=seasonal * noise_frac)
+            # Weekend effect.
+            if date.dayofweek >= 5:  # 5=Saturday, 6=Sunday
+                lam = seasonal_rate * WEEKEND_FACTOR
+            else:
+                lam = seasonal_rate
 
-            total = int(round(max(1.0, seasonal + noise)))
+            # Clip lambda so Poisson draw very rarely exceeds MAX_DAILY_COUNT.
+            lam = min(lam, MAX_DAILY_COUNT - 1.0)
+
+            # Draw from Poisson and cap.
+            count = int(min(rng.poisson(lam), MAX_DAILY_COUNT))
 
             rows.append(
                 {
-                    APPLICATION_DATE_COLUMN: date,
+                    DATE_COLUMN: date.strftime("%Y-%m-%d"),
                     COURSE_COLUMN: course,
-                    COUNT_COLUMN: total,
+                    COUNT_COLUMN: count,
                 }
             )
 
-    dataframe = (
+    df = (
         pd.DataFrame(rows)
-        .sort_values([APPLICATION_DATE_COLUMN, COURSE_COLUMN])
+        .sort_values([DATE_COLUMN, COURSE_COLUMN])
         .reset_index(drop=True)
     )
-
-    return dataframe
+    return df
 
 
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 
-def validate(dataframe: pd.DataFrame) -> None:
+def validate(df: pd.DataFrame) -> None:
     """Raise AssertionError if the dataset does not meet all requirements."""
-    expected_rows = 60 * len(COURSE_PROFILES)
-    assert len(dataframe) == expected_rows, (
-        f"Expected {expected_rows} rows, got {len(dataframe)}"
+    dates = pd.date_range(start=START_DATE, end=END_DATE, freq="D")
+    expected_rows = len(dates) * len(CANONICAL_COURSES)
+
+    assert len(df) == expected_rows, (
+        f"Expected {expected_rows} rows, got {len(df)}"
     )
 
-    expected_cols = {APPLICATION_DATE_COLUMN, COURSE_COLUMN, COUNT_COLUMN}
-    assert set(dataframe.columns) == expected_cols, (
-        f"Unexpected columns: {set(dataframe.columns)}"
+    expected_cols = {DATE_COLUMN, COURSE_COLUMN, COUNT_COLUMN}
+    assert set(df.columns) == expected_cols, (
+        f"Unexpected columns: {set(df.columns)}"
     )
 
-    assert "barangay" not in dataframe.columns, "barangay column must not be present"
-
-    assert dataframe[COUNT_COLUMN].min() >= 1, "All counts must be positive integers"
-
-    assert dataframe.isnull().sum().sum() == 0, "Dataset contains missing values"
-
-    assert dataframe[COURSE_COLUMN].nunique() == len(COURSE_PROFILES), (
-        "Course count mismatch"
+    assert df[COUNT_COLUMN].min() >= 0, "applicant_count must be >= 0"
+    assert df[COUNT_COLUMN].max() <= MAX_DAILY_COUNT, (
+        f"applicant_count must be <= {MAX_DAILY_COUNT}, got {df[COUNT_COLUMN].max()}"
     )
 
-    months = dataframe[APPLICATION_DATE_COLUMN].nunique()
-    assert months == 60, f"Expected 60 months, got {months}"
+    assert df.isnull().sum().sum() == 0, "Dataset contains missing values"
+
+    present_courses = set(df[COURSE_COLUMN].unique())
+    assert present_courses == set(CANONICAL_COURSES), (
+        f"Course mismatch. Missing: {set(CANONICAL_COURSES) - present_courses}"
+    )
+
+    # No duplicate (date, course) pairs.
+    dupes = df.duplicated(subset=[DATE_COLUMN, COURSE_COLUMN]).sum()
+    assert dupes == 0, f"{dupes} duplicate (date, course) pairs found"
+
+    # Every course has complete daily coverage.
+    for course in CANONICAL_COURSES:
+        n = int((df[COURSE_COLUMN] == course).sum())
+        assert n == len(dates), (
+            f"Expected {len(dates)} rows for '{course}', got {n}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -156,35 +252,37 @@ def validate(dataframe: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    dataset = build_dataset()
-    validate(dataset)
+    df = build_dataset()
+    validate(df)
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    dataset.to_csv(OUTPUT_PATH, index=False, date_format="%Y-%m-%d")
+    df.to_csv(OUTPUT_PATH, index=False)
 
-    print("=" * 60)
-    print("Dataset generated successfully.")
-    print(f"Output : {OUTPUT_PATH.resolve()}")
-    print("=" * 60)
+    dates = pd.date_range(start=START_DATE, end=END_DATE, freq="D")
 
-    print(f"\nRows            : {len(dataset)}")
-    print(f"Columns         : {list(dataset.columns)}")
-    print(f"Unique courses  : {dataset[COURSE_COLUMN].nunique()}")
-    print(
-        f"Date range      : "
-        f"{dataset[APPLICATION_DATE_COLUMN].min().date()} → "
-        f"{dataset[APPLICATION_DATE_COLUMN].max().date()}"
-    )
-    print(f"Min total_apps  : {dataset[COUNT_COLUMN].min()}")
-    print(f"Max total_apps  : {dataset[COUNT_COLUMN].max()}")
-    print(f"Missing values  : {dataset.isnull().sum().sum()}")
-    print(f"barangay column : {'present' if 'barangay' in dataset.columns else 'absent ✓'}")
-
-    print("\nFirst 10 rows:")
-    print(dataset.head(10).to_string(index=False))
-
-    print("\nLast 10 rows:")
-    print(dataset.tail(10).to_string(index=False))
+    print("=" * 64)
+    print("SYNTHETIC DAILY DATASET — applicant_volume.csv")
+    print("NOTE: All values are synthetically generated.")
+    print("      Not actual TESDA/TLDC applicant records.")
+    print("=" * 64)
+    print(f"Output          : {OUTPUT_PATH.resolve()}")
+    print(f"Total rows      : {len(df):,}")
+    print(f"Columns         : {list(df.columns)}")
+    print(f"Unique courses  : {df[COURSE_COLUMN].nunique()}")
+    print(f"Date range      : {df[DATE_COLUMN].min()} → {df[DATE_COLUMN].max()}")
+    print(f"Days covered    : {len(dates):,}")
+    print(f"Min count       : {df[COUNT_COLUMN].min()}")
+    print(f"Max count       : {df[COUNT_COLUMN].max()}")
+    print(f"Missing values  : {df.isnull().sum().sum()}")
+    print(f"Duplicate pairs : {df.duplicated(subset=[DATE_COLUMN, COURSE_COLUMN]).sum()}")
+    print()
+    print("Sample rows (first 5):")
+    print(df.head(5).to_string(index=False))
+    print()
+    print("Daily total range check:")
+    daily_totals = df.groupby(DATE_COLUMN)[COUNT_COLUMN].sum()
+    print(f"  Min daily total (all courses): {daily_totals.min()}")
+    print(f"  Max daily total (all courses): {daily_totals.max()}")
 
 
 if __name__ == "__main__":

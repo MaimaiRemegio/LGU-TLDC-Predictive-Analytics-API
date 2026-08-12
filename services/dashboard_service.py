@@ -1,28 +1,14 @@
 from services.applicant_data_repository import get_applicant_data_repository
-from services.applicant_forecast_service import get_applicant_forecast_service
+from services.forecasting_service import get_forecasting_service
 from services.completion_predictor import recommend_barangays
 
 
 class DashboardService:
 
     def __init__(self):
-        self.forecast = get_applicant_forecast_service()
+        # Use ForecastingService — the single source of truth for forecasts.
+        self.forecast = get_forecasting_service()
         self.applicants = get_applicant_data_repository()
-
-    def _extract_next_month_forecast(self, forecast_result) -> float:
-        """Extract the first monthly forecast value from the forecast service response."""
-        if isinstance(forecast_result, dict):
-            forecast_values = forecast_result.get("forecast", [])
-            if not forecast_values:
-                raise ValueError("Forecast service returned no forecast values.")
-            return forecast_values[0]
-
-        if isinstance(forecast_result, list):
-            if not forecast_result:
-                raise ValueError("Forecast service returned an empty forecast list.")
-            return forecast_result[0]
-
-        raise ValueError("Unsupported forecast response format.")
 
     def get_summary(self):
 
@@ -32,8 +18,8 @@ class DashboardService:
         best = ranking[0]
         top3 = ranking[:3]
 
-        forecast_result = self.forecast.forecast_tldc_total("next_month")
-        forecast_next_month = forecast_result["monthly_forecast"][0]
+        # ForecastingService._sum_forecast(1) returns the TLDC-wide next-month total.
+        forecast_next_month = self.forecast._sum_forecast(1)
 
         insights = [
             f"{best['barangay']} has the highest predicted completion probability ({best['completion_probability']}%).",

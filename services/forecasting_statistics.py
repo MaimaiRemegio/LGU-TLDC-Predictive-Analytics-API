@@ -15,6 +15,7 @@ import pandas as pd
 from services.forecasting_repository import (
     BARANGAY_COLUMN,
     COURSE_COLUMN,
+    COUNT_COLUMN,
     ForecastingRepository,
     get_forecasting_repository,
 )
@@ -168,48 +169,81 @@ class ForecastingStatistics:
         }
 
     def get_organization_distributions(self) -> dict:
-        """Return organization-wide distributions for charts and insights."""
-        registrations = self._repository.get_registration_history()
+        """
+        Return organisation-wide distributions for charts and insights.
+
+        Source split (intentional):
+        - course_distribution / most_popular_course
+            → from applicant_volume.csv via get_registration_history()
+              because that file contains the canonical 21 courses and
+              accurate monthly totals.  historical_training.csv only
+              covers the old 8 courses used by the completion model.
+        - employment / education / sex / age / learner_classification
+            → from historical_training.csv via get_demographic_profiles()
+              because applicant_volume.csv has no demographic columns.
+              These distributions are clearly labelled as coming from the
+              completion-model training dataset and are displayed for
+              informational context only.
+        """
+        # Course volume source — canonical 21 courses (applicant_volume.csv).
+        volume_records = self._repository.get_registration_history()
+        course_column = COURSE_COLUMN   # "course"
+
+        # Demographic source — historical_training.csv (completion model dataset).
         demographics = self._repository.get_demographic_profiles()
-        profile_records = demographics if not demographics.empty else registrations
-        course_column = (
-            "course_applied"
-            if "course_applied" in profile_records.columns
-            else COURSE_COLUMN
+
+        # Build course distribution from the volume dataset (new daily schema).
+        # Use COUNT_COLUMN ("applicant_count") for summing totals.
+        course_totals = (
+            volume_records.groupby(course_column)[COUNT_COLUMN]
+            .sum()
+            .sort_values(ascending=False)
+        )
+        total_applications = int(course_totals.sum())
+        course_distribution = [
+            {
+                "label": str(course),
+                "count": int(count),
+                "percentage": round((count / total_applications) * 100, 1)
+                if total_applications
+                else 0.0,
+            }
+            for course, count in course_totals.head(21).items()
+        ]
+        most_popular_course = (
+            str(course_totals.index[0]) if not course_totals.empty else None
         )
 
+        # Demographic distributions come from historical_training.csv.
+        # These columns do not exist in applicant_volume.csv.
         return {
             "employment_distribution": self._build_distribution(
-                profile_records,
+                demographics,
                 "employment_status",
             ),
             "education_distribution": self._build_distribution(
-                profile_records,
+                demographics,
                 "educational_attainment",
             ),
-            "course_distribution": self._build_distribution(
-                profile_records,
-                course_column,
-                limit=10,
-            ),
-            "sex_distribution": self._build_distribution(profile_records, "sex"),
-            "age_distribution": self._build_age_distribution(profile_records),
+            "course_distribution": course_distribution,
+            "sex_distribution": self._build_distribution(demographics, "sex"),
+            "age_distribution": self._build_age_distribution(demographics),
             "learner_classification_distribution": self._build_distribution(
-                profile_records,
+                demographics,
                 "learner_classification",
             ),
             "barangay_distribution": self._build_distribution(
-                registrations,
+                demographics,
                 BARANGAY_COLUMN,
                 limit=10,
             ),
-            "most_popular_course": self._most_common_label(profile_records, course_column),
+            "most_popular_course": most_popular_course,
             "most_common_employment_status": self._most_common_label(
-                profile_records,
+                demographics,
                 "employment_status",
             ),
             "most_common_educational_attainment": self._most_common_label(
-                profile_records,
+                demographics,
                 "educational_attainment",
             ),
         }

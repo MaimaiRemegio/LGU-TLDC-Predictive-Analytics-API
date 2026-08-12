@@ -6,15 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes import dashboard
 from routes import applicant_forecast, completion, forecasting
 from services.applicant_data_repository import get_applicant_data_repository
-from services.applicant_forecast_service import get_applicant_forecast_service
 from services.completion_predictor import get_completion_predictor
 from services.forecasting_service import get_forecasting_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Single forecasting pipeline warm-up.
+    # ForecastingService fits all ARIMA models and is shared by every
+    # forecast endpoint including POST /predict/applicant-volume.
     get_completion_predictor()
-    get_applicant_forecast_service()
     get_applicant_data_repository()
     get_forecasting_service()
     yield

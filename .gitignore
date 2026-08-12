@@ -4,3 +4,17 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# Test cache
+.pytest_cache/
+
+# Temporary files (specific patterns)
+chart_response.json
+gen_out.txt
+structure.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

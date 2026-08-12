@@ -53,7 +53,6 @@ def test_mape_excludes_zero_actuals_safely():
     predictions = [5.0, 120.0, 3.0, 40.0]
     metrics = compute_forecast_metrics(actuals, predictions)
 
-    # MAE/RMSE include zeros; MAPE uses only y>0 periods.
     assert metrics.test_periods == 4
     assert metrics.mape_periods == 2
     expected_mape = ((20 / 100) + (10 / 50)) / 2.0 * 100.0
@@ -80,10 +79,9 @@ def test_classify_mape_thresholds():
 
 
 def test_walk_forward_never_trains_on_future_and_metrics_are_computed():
-    # Smooth increasing series so ARIMA can fit quickly and stably.
-    index = pd.date_range("2021-01-03", periods=40, freq="W-SUN")
+    index = pd.date_range("2021-01-01", periods=40, freq="MS")
     values = np.linspace(50, 120, 40) + np.sin(np.linspace(0, 6, 40)) * 2
-    series = pd.Series(values, index=index, name="applicant_count")
+    series = pd.Series(values, index=index, name="total_applications")
 
     split = chronological_split_index(len(series), train_ratio=0.8)
     metrics = walk_forward_backtest(
@@ -100,29 +98,29 @@ def test_walk_forward_never_trains_on_future_and_metrics_are_computed():
     assert len(metrics.actuals) == metrics.test_periods
     assert len(metrics.predictions) == metrics.test_periods
 
-    # Recompute metrics from stored pairs to prove nothing is hardcoded.
     recomputed = compute_forecast_metrics(metrics.actuals, metrics.predictions)
     assert recomputed.mape == metrics.mape
     assert recomputed.mae == metrics.mae
     assert recomputed.rmse == metrics.rmse
 
 
-def test_evaluation_service_uses_injected_series_via_stub_repository():
+def test_evaluation_service_uses_injected_course_series_via_stub_repository():
     """Service overall metrics must come from walk-forward predictions vs actuals."""
 
     class StubRepository:
-        def get_tldc_series(self, frequency: str = "W"):
-            index = pd.date_range("2022-01-02", periods=30, freq="W-SUN")
-            values = np.linspace(80, 140, 30)
+        def get_tldc_series(self, frequency: str = "M"):
+            index = pd.date_range("2021-01-01", periods=30, freq="MS")
+            values = np.linspace(800, 1400, 30)
             return pd.Series(values, index=index)
 
-        def get_available_barangays(self):
-            return ["Alpha", "Beta"]
+        def get_available_courses(self):
+            return ["Cookery NC II", "Driving NC II"]
 
-        def get_barangay_series(self, barangay: str, frequency: str = "W"):
-            index = pd.date_range("2022-01-02", periods=30, freq="W-SUN")
-            base = 40 if barangay == "Alpha" else 55
-            values = np.linspace(base, base + 30, 30)
+        def get_course_series(self, course: str):
+            # Return WEEKLY series to match current architecture
+            index = pd.date_range("2021-01-01", periods=30, freq="W")
+            base = 400 if course == "Cookery NC II" else 300
+            values = np.linspace(base, base + 200, 30)
             return pd.Series(values, index=index)
 
     service = ForecastingEvaluationService(
@@ -135,13 +133,22 @@ def test_evaluation_service_uses_injected_series_via_stub_repository():
     assert result["dataset_type"] == "synthetic"
     assert result["evaluation_method"] == "Chronological time-series backtesting"
     assert result["arima_order"] == [1, 1, 1]
+    assert result["frequency"] == "weekly"  # Updated to match weekly architecture
     assert result["overall"]["test_periods"] > 0
     assert result["overall"]["mape"] is not None
     assert result["overall"]["mae"] is not None
     assert result["overall"]["rmse"] is not None
     assert result["model_assessment"] == classify_mape(result["overall"]["mape"])
-    assert len(result["barangay_results"]) == 2
 
-    # No hardcoded accuracy constant: assessment depends on computed MAPE.
+    # Per-course results instead of per-barangay.
+    assert len(result["course_results"]) == 2
+    course_names = [r["course"] for r in result["course_results"]]
+    assert "Cookery NC II" in course_names
+    assert "Driving NC II" in course_names
+
+    # No barangay keys anywhere in the result.
+    assert "barangay_results" not in result
+    assert "barangay" not in str(result["course_results"])
+
     assert "accuracy" not in result or not isinstance(result.get("accuracy"), (int, float))
     assert "Prototype Ready" not in str(result["overall"])
