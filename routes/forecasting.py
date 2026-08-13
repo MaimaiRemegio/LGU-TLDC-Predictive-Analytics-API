@@ -8,10 +8,9 @@ Forecast filters
 period : next_week | next_month | next_quarter
 course : specific course name | omit for TLDC-wide (all courses)
 
-next_week note
+Data Ingestion
 --------------
-next_week is an estimated weekly equivalent (next_month ÷ 4.33).
-The source dataset is monthly only; no weekly ARIMA is fitted.
+POST /forecast/ingest-data - Ingest daily applicant volumes from Laravel
 """
 
 from __future__ import annotations
@@ -19,16 +18,62 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 
 from services.forecasting_repository import (
     BarangayNotFoundError,
     CourseNotFoundError,
+    get_forecasting_repository,
 )
 from services.forecasting_evaluation import get_forecasting_evaluation_service
 from services.forecasting_service import get_forecasting_service
 
 router = APIRouter(prefix="/forecast", tags=["Applicant Volume Forecasting"])
+
+
+# ---------------------------------------------------------------------------
+# Data Ingestion Models
+# ---------------------------------------------------------------------------
+
+class DailyVolumeRecord(BaseModel):
+    date: str = Field(..., description="Application date in YYYY-MM-DD format")
+    course: str = Field(..., description="Course name")
+    applicant_count: int = Field(..., ge=0, description="Number of applicants")
+    
+    @validator('date')
+    def validate_date(cls, v):
+        from datetime import datetime
+        try:
+            datetime.strptime(v, '%Y-%m-%d')
+        except ValueError:
+            raise ValueError('Date must be in YYYY-MM-DD format')
+        return v
+
+
+class DateRange(BaseModel):
+    start_date: str
+    end_date: str
+
+
+class DataIngestionRequest(BaseModel):
+    source: str = Field(..., description="Data source identifier")
+    data_version: str = Field(default="1.0", description="API version")
+    sync_type: Literal["full", "incremental"] = Field(..., description="Sync mode")
+    date_range: DateRange
+    daily_volumes: list[DailyVolumeRecord]
+    manual_retrain: bool = Field(default=False, description="Force retraining")
+
+
+class DataIngestionResponse(BaseModel):
+    status: str
+    message: str
+    records_received: int
+    records_stored: int
+    date_range: DateRange
+    sync_type: str
+    retraining_triggered: bool
+    retraining_reason: str | None
+    retraining_result: dict | None
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +260,106 @@ class ForecastEvaluationResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.post(
+    "/ingest-data",
+    response_model=DataIngestionResponse,
+    summary="Ingest daily applicant volume data",
+)
+def ingest_data(request: DataIngestionRequest) -> DataIngestionResponse:
+    """
+    Ingest daily applicant volume data from Laravel.
+    
+    Validates, stores, and optionally retrains ARIMA models based on data criteria.
+    
+    Retraining occurs when:
+    - Sufficient new/changed data exists (>= 30 new days), OR
+    - Manual retraining is requested
+    """
+    try:
+        # Validate courses
+        repository = get_forecasting_repository()
+        valid_courses = set(repository.get_available_courses())
+        
+        validation_errors = []
+        valid_records = []
+        
+        for idx, record in enumerate(request.daily_volumes):
+            if record.course not in valid_courses:
+                validation_errors.append({
+                    "field": f"daily_volumes[{idx}].course",
+                    "error": f"Unknown course '{record.course}'"
+                })
+            else:
+                valid_records.append(record.dict())
+        
+        if validation_errors:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "status": "error",
+                    "message": "Validation failed",
+                    "errors": validation_errors,
+                    "records_received": len(request.daily_volumes),
+                    "records_valid": len(valid_records)
+                }
+            )
+        
+        # Get last training time to calculate new data
+        service = get_forecasting_service()
+        last_training = service._last_training_time
+        
+        # Store data
+        metrics = repository.upsert_daily_volumes(
+            valid_records,
+            sync_type=request.sync_type
+        )
+        
+        # Calculate new data count
+        if request.sync_type == "incremental" and last_training:
+            new_data_count = repository.get_new_data_count(
+                last_training.strftime('%Y-%m-%d')
+            )
+        else:
+            # Full sync always has "new" data
+            new_data_count = 999
+        
+        # Check if retraining is needed
+        should_retrain, reason = service._should_retrain(
+            new_data_count=new_data_count,
+            manual_trigger=request.manual_retrain
+        )
+        
+        retraining_result = None
+        if should_retrain:
+            # Perform retraining synchronously
+            retraining_result = service.retrain_models(
+                manual_trigger=request.manual_retrain
+            )
+        
+        return DataIngestionResponse(
+            status="completed",
+            message="Data ingestion completed successfully",
+            records_received=len(request.daily_volumes),
+            records_stored=metrics["total_records"],
+            date_range=request.date_range,
+            sync_type=request.sync_type,
+            retraining_triggered=should_retrain,
+            retraining_reason=reason if should_retrain else None,
+            retraining_result=retraining_result
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "status": "error",
+                "message": f"Data ingestion failed: {str(e)}"
+            }
+        )
+
 
 @router.get(
     "/dashboard",

@@ -11,6 +11,12 @@ datasets/applicant_volume.csv
 The repository aggregates daily → weekly before returning series to this
 service.  ARIMA(1,1,1) is then fitted on weekly totals per course.
 
+Model Persistence
+-----------------
+Trained ARIMA models are saved to trained_models/forecasting/models/*.pkl
+Model metadata is tracked in trained_models/forecasting/metadata/model_registry.json
+On startup, saved models are loaded if available (avoiding retraining)
+
 Forecast horizons
 -----------------
   next_week   = ARIMA step 1  (1 week ahead)
@@ -47,10 +53,15 @@ It backs /forecast/* endpoints AND POST /predict/applicant-volume.
 
 from __future__ import annotations
 
+import json
+import logging
 import warnings
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from statsmodels.iolib.smpickle import load_pickle
 from statsmodels.tsa.arima.model import ARIMA
 
 from services.forecasting_repository import (
@@ -61,6 +72,22 @@ from services.forecasting_statistics import (
     ForecastingStatistics,
     get_forecasting_statistics,
 )
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Project root
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Model persistence paths
+MODELS_DIR = PROJECT_ROOT / "trained_models" / "forecasting" / "models"
+METADATA_DIR = PROJECT_ROOT / "trained_models" / "forecasting" / "metadata"
+MODEL_REGISTRY_FILE = METADATA_DIR / "model_registry.json"
+
+# Ensure directories exist
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 ARIMA_ORDER = (1, 1, 1)
 
@@ -79,6 +106,9 @@ STEPS_PRECOMPUTE = STEPS_NEXT_12_MONTHS
 # Number of recent weeks used for the trend/growth baseline.
 RECENT_PERIODS_FOR_TREND = 4   # last 4 weeks ≈ last month
 TREND_STABLE_THRESHOLD_PERCENT = 5.0
+
+# Retraining thresholds (configurable)
+RETRAIN_MIN_NEW_DAYS = 30  # Minimum new daily observations to trigger retraining
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +142,17 @@ class ForecastingService:
 
         self._cached_distributions: dict | None = None
         self._cached_course_forecasts: dict[str, list[dict]] = {}
+        
+        # Model persistence tracking
+        self._model_registry: dict = {}
+        self._last_training_time: datetime | None = None
+        self._retraining_in_progress: bool = False
 
-        self._fit_course_models()
+        # Try to load saved models, fall back to training if not available
+        if not self._load_saved_models():
+            logger.info("No saved models found. Training new models...")
+            self._fit_course_models()
+            self._save_models()
 
     # ------------------------------------------------------------------
     # Model fitting
@@ -141,6 +180,198 @@ class ForecastingService:
             self._weekly_forecast[course] = [
                 max(0.0, round(float(v), 2)) for v in preds
             ]
+
+    # ------------------------------------------------------------------
+    # Model persistence
+    # ------------------------------------------------------------------
+
+    def _load_saved_models(self) -> bool:
+        """
+        Load saved ARIMA models from disk.
+        
+        Returns:
+            True if models were loaded successfully, False otherwise
+        """
+        try:
+            if not MODEL_REGISTRY_FILE.exists():
+                logger.info("Model registry not found")
+                return False
+            
+            # Load registry
+            with open(MODEL_REGISTRY_FILE, 'r') as f:
+                self._model_registry = json.load(f)
+            
+            logger.info(f"Loaded model registry with {len(self._model_registry.get('models', {}))} courses")
+            
+            # Load each course model
+            models_loaded = 0
+            for course, metadata in self._model_registry.get('models', {}).items():
+                model_file = PROJECT_ROOT / "trained_models" / "forecasting" / metadata['file']
+                
+                if not model_file.exists():
+                    logger.warning(f"Model file not found for {course}: {model_file}")
+                    return False
+                
+                try:
+                    # Load model using statsmodels
+                    fitted = load_pickle(str(model_file))
+                    self._weekly_models[course] = fitted
+                    
+                    # Regenerate series and forecasts
+                    series = self._repository.get_course_series(course)
+                    self._weekly_series[course] = series
+                    
+                    preds = np.asarray(
+                        fitted.forecast(steps=STEPS_PRECOMPUTE), dtype=float
+                    )
+                    self._weekly_forecast[course] = [
+                        max(0.0, round(float(v), 2)) for v in preds
+                    ]
+                    
+                    models_loaded += 1
+                    
+                except Exception as e:
+                    logger.error(f"Failed to load model for {course}: {e}")
+                    return False
+            
+            # Update last training time
+            if 'last_training_time' in self._model_registry:
+                self._last_training_time = datetime.fromisoformat(
+                    self._model_registry['last_training_time']
+                )
+            
+            logger.info(f"Successfully loaded {models_loaded} saved models")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading saved models: {e}")
+            return False
+
+    def _save_models(self) -> None:
+        """Save trained ARIMA models to disk."""
+        try:
+            # Prepare model registry
+            start_date, end_date = self._repository.get_data_date_range()
+            
+            registry = {
+                "active_version": "v1",
+                "models": {},
+                "last_training_time": datetime.now().isoformat(),
+                "arima_order": list(ARIMA_ORDER)
+            }
+            
+            # Save each course model
+            for course, fitted_model in self._weekly_models.items():
+                # Create safe filename from course name
+                safe_course = course.replace(" ", "_").replace("/", "_")
+                model_filename = f"{safe_course}_v1.pkl"
+                model_path = MODELS_DIR / model_filename
+                
+                # Save model using statsmodels
+                fitted_model.save(str(model_path))
+                
+                # Add to registry
+                registry["models"][course] = {
+                    "version": "v1",
+                    "file": f"models/{model_filename}",
+                    "trained_at": datetime.now().isoformat(),
+                    "data_start_date": start_date,
+                    "data_end_date": end_date,
+                    "arima_order": list(ARIMA_ORDER),
+                    "observations": len(self._weekly_series[course])
+                }
+            
+            # Save registry
+            with open(MODEL_REGISTRY_FILE, 'w') as f:
+                json.dump(registry, f, indent=2)
+            
+            self._model_registry = registry
+            self._last_training_time = datetime.now()
+            
+            logger.info(f"Saved {len(self._weekly_models)} models to disk")
+            
+        except Exception as e:
+            logger.error(f"Error saving models: {e}")
+            raise
+
+    def _should_retrain(self, new_data_count: int, manual_trigger: bool = False) -> tuple[bool, str]:
+        """
+        Determine if models should be retrained.
+        
+        Args:
+            new_data_count: Number of new daily observations since last training
+            manual_trigger: Whether retraining was manually requested
+        
+        Returns:
+            (should_retrain: bool, reason: str)
+        """
+        if manual_trigger:
+            return True, "Manual retraining requested"
+        
+        if new_data_count >= RETRAIN_MIN_NEW_DAYS:
+            return True, f"Sufficient new data ({new_data_count} new days >= {RETRAIN_MIN_NEW_DAYS} threshold)"
+        
+        return False, f"No retraining needed ({new_data_count} new days < {RETRAIN_MIN_NEW_DAYS} threshold)"
+
+    def retrain_models(self, manual_trigger: bool = False) -> dict:
+        """
+        Retrain all ARIMA models with latest data.
+        
+        Args:
+            manual_trigger: Whether this is a manual retraining request
+        
+        Returns:
+            Training result with metrics
+        """
+        if self._retraining_in_progress:
+            return {
+                "status": "error",
+                "message": "Retraining already in progress"
+            }
+        
+        try:
+            self._retraining_in_progress = True
+            start_time = datetime.now()
+            
+            logger.info("Starting model retraining...")
+            
+            # Clear existing models and caches
+            self._weekly_series.clear()
+            self._weekly_models.clear()
+            self._weekly_forecast.clear()
+            self._cached_distributions = None
+            self._cached_course_forecasts.clear()
+            
+            # Reload data
+            self._repository.reload_data()
+            
+            # Retrain models
+            self._fit_course_models()
+            
+            # Save new models
+            self._save_models()
+            
+            elapsed = (datetime.now() - start_time).total_seconds()
+            
+            result = {
+                "status": "completed",
+                "message": "Models retrained successfully",
+                "training_time_seconds": round(elapsed, 2),
+                "courses_trained": len(self._weekly_models),
+                "training_timestamp": self._last_training_time.isoformat() if self._last_training_time else None
+            }
+            
+            logger.info(f"Retraining completed in {elapsed:.2f}s")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error during retraining: {e}")
+            return {
+                "status": "error",
+                "message": f"Retraining failed: {str(e)}"
+            }
+        finally:
+            self._retraining_in_progress = False
 
     # ------------------------------------------------------------------
     # Aggregation helpers

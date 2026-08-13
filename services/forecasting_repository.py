@@ -19,6 +19,8 @@ profile panels (sex, age, education, etc.).  It is NEVER passed to ARIMA.
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -43,6 +45,11 @@ BARANGAY_COLUMN = "barangay"
 
 # Weekly aggregation anchor: weeks end on Sunday.
 WEEKLY_FREQ = "W-SUN"
+
+# Historical data cutoff: only use complete historical data for training
+# This should match the END_DATE in training/generate_applicant_volume_history.py
+# Data after this date is considered incomplete/future and excluded from ARIMA training
+HISTORICAL_CUTOFF_DATE = "2025-12-31"
 
 # Keep backward-compatible aliases so callers can still pass "M" or "W".
 _FREQ_ALIAS = {
@@ -147,9 +154,17 @@ class ForecastingRepository:
 
         Daily counts are summed per week (week ending Sunday).
         This is the primary ARIMA input.
+        
+        Only returns data up to HISTORICAL_CUTOFF_DATE to ensure
+        incomplete/future data does not contaminate ARIMA training.
         """
         self.validate_course(course)
         subset = self._daily[self._daily[COURSE_COLUMN] == course].copy()
+        
+        # Filter to historical cutoff date
+        cutoff = pd.to_datetime(HISTORICAL_CUTOFF_DATE)
+        subset = subset[subset[DATE_COLUMN] <= cutoff]
+        
         daily = (
             subset.set_index(DATE_COLUMN)[COUNT_COLUMN]
             .astype(float)
@@ -176,24 +191,35 @@ class ForecastingRepository:
 
         Default frequency is weekly (matches the ARIMA training series).
         Pass frequency="M" for monthly totals (used by chart/summary helpers).
+        
+        For ARIMA training (weekly), only returns data up to HISTORICAL_CUTOFF_DATE.
+        For charts (monthly), returns all available data.
         """
         if self._daily.empty:
             return pd.Series(dtype=float)
 
+        # Filter to historical cutoff for ARIMA training (weekly)
+        freq_key = _FREQ_ALIAS.get(frequency, "W")
+        if freq_key == "W":
+            cutoff = pd.to_datetime(HISTORICAL_CUTOFF_DATE)
+            daily_filtered = self._daily[self._daily[DATE_COLUMN] <= cutoff].copy()
+        else:
+            # For monthly charts, use all available data
+            daily_filtered = self._daily.copy()
+
         daily_total = (
-            self._daily.groupby(DATE_COLUMN)[COUNT_COLUMN]
+            daily_filtered.groupby(DATE_COLUMN)[COUNT_COLUMN]
             .sum()
             .sort_index()
             .astype(float)
         )
         daily_total.index = pd.DatetimeIndex(daily_total.index)
 
-        freq_key = _FREQ_ALIAS.get(frequency, "W")
         if freq_key == "M":
             return daily_total.resample("MS").sum().asfreq("MS")
         if freq_key == "D":
             return daily_total.asfreq("D", fill_value=0.0)
-        # Default: weekly
+        # Default: weekly (for ARIMA)
         return daily_total.resample(WEEKLY_FREQ).sum().asfreq(WEEKLY_FREQ)
 
     def get_course_monthly_series(self, course: str) -> pd.Series:
@@ -271,6 +297,89 @@ class ForecastingRepository:
     def get_registrations_for_barangay(self, barangay: str) -> pd.DataFrame:
         """Return demographic profile records for one barangay."""
         return self.get_demographic_profiles_for_barangay(barangay)
+
+    # ------------------------------------------------------------------
+    # Data ingestion and persistence
+    # ------------------------------------------------------------------
+
+    def upsert_daily_volumes(
+        self,
+        daily_volumes: list[dict],
+        sync_type: str = "full"
+    ) -> dict:
+        """
+        Insert or update daily volume data.
+        
+        Args:
+            daily_volumes: List of {"date": str, "course": str, "applicant_count": int}
+            sync_type: "full" (replace all) or "incremental" (append new)
+        
+        Returns:
+            Metrics about the operation
+        """
+        new_df = pd.DataFrame(daily_volumes)
+        new_df['date'] = pd.to_datetime(new_df['date'])
+        
+        if sync_type == "full":
+            # Replace entire dataset
+            self._daily = new_df.sort_values(['course', 'date']).reset_index(drop=True)
+        else:
+            # Incremental: remove duplicates, append new
+            self._daily = pd.concat([self._daily, new_df], ignore_index=True)
+            self._daily = self._daily.drop_duplicates(
+                subset=['date', 'course'],
+                keep='last'
+            )
+            self._daily = self._daily.sort_values(['course', 'date']).reset_index(drop=True)
+        
+        # Persist to storage
+        self._persist_data()
+        
+        return {
+            "total_records": len(self._daily),
+            "new_records_added": len(new_df),
+            "date_range": {
+                "start": str(self._daily['date'].min().date()),
+                "end": str(self._daily['date'].max().date())
+            }
+        }
+
+    def _persist_data(self) -> None:
+        """Save data to CSV."""
+        self._daily.to_csv(self._volume_path, index=False)
+
+    def reload_data(self) -> None:
+        """Reload the daily volume dataset from storage."""
+        self._daily = self._load_daily(self._volume_path)
+
+    def get_data_date_range(self) -> tuple[str, str]:
+        """
+        Return the start and end dates for ARIMA training.
+        
+        Uses HISTORICAL_CUTOFF_DATE as the end date to ensure
+        models are trained only on complete historical data.
+        """
+        if self._daily.empty:
+            return "", ""
+        
+        # Use cutoff date as training end date
+        cutoff = pd.to_datetime(HISTORICAL_CUTOFF_DATE)
+        filtered = self._daily[self._daily[DATE_COLUMN] <= cutoff]
+        
+        if filtered.empty:
+            return "", ""
+            
+        return (
+            str(filtered['date'].min().date()),
+            str(cutoff.date())
+        )
+
+    def get_new_data_count(self, since_date: str) -> int:
+        """Count unique dates added since a given date."""
+        if self._daily.empty:
+            return 0
+        since = pd.to_datetime(since_date)
+        return len(self._daily[self._daily['date'] > since]['date'].unique())
 
 
 # ------------------------------------------------------------------

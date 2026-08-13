@@ -1,0 +1,284 @@
+{
+  "active_version": "v1",
+  "models": {
+    "Bookkeeping NC II": {
+      "version": "v1",
+      "file": "models/Bookkeeping_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.820490",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Carpentry NC II": {
+      "version": "v1",
+      "file": "models/Carpentry_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.828831",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Computer Systems Servicing NC II": {
+      "version": "v1",
+      "file": "models/Computer_Systems_Servicing_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.847153",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Construction Painting NC II": {
+      "version": "v1",
+      "file": "models/Construction_Painting_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.880059",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Cookery NC II": {
+      "version": "v1",
+      "file": "models/Cookery_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.888877",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Driving NC II": {
+      "version": "v1",
+      "file": "models/Driving_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.897274",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Electrical Installation and Maintenance NC II": {
+      "version": "v1",
+      "file": "models/Electrical_Installation_and_Maintenance_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.911829",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Electronic Products Assembly and Servicing NC II": {
+      "version": "v1",
+      "file": "models/Electronic_Products_Assembly_and_Servicing_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.953674",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "HEO (Bulldozer) NC II": {
+      "version": "v1",
+      "file": "models/HEO_(Bulldozer)_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.961510",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "HEO (Forklift) NC II": {
+      "version": "v1",
+      "file": "models/HEO_(Forklift)_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.970961",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "HEO (Hydraulic Excavator) NC II": {
+      "version": "v1",
+      "file": "models/HEO_(Hydraulic_Excavator)_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:49.984930",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "HEO (Wheel Loader) NC II": {
+      "version": "v1",
+      "file": "models/HEO_(Wheel_Loader)_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.022562",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Landscape Installation and Maintenance (Softscape)": {
+      "version": "v1",
+      "file": "models/Landscape_Installation_and_Maintenance_(Softscape)_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.030943",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Machining NC I": {
+      "version": "v1",
+      "file": "models/Machining_NC_I_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.045338",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Machining NC II": {
+      "version": "v1",
+      "file": "models/Machining_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.078496",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Masonry NC I": {
+      "version": "v1",
+      "file": "models/Masonry_NC_I_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.088830",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Masonry NC II": {
+      "version": "v1",
+      "file": "models/Masonry_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.097932",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Organic Agriculture Production NC II": {
+      "version": "v1",
+      "file": "models/Organic_Agriculture_Production_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.109281",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Shielded Metal Arc Welding NC I": {
+      "version": "v1",
+      "file": "models/Shielded_Metal_Arc_Welding_NC_I_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.128382",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Shielded Metal Arc Welding NC II": {
+      "version": "v1",
+      "file": "models/Shielded_Metal_Arc_Welding_NC_II_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.146861",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    },
+    "Trainers Methodology Level I": {
+      "version": "v1",
+      "file": "models/Trainers_Methodology_Level_I_v1.pkl",
+      "trained_at": "2026-08-13T16:47:50.164306",
+      "data_start_date": "2021-01-01",
+      "data_end_date": "2025-12-31",
+      "arima_order": [
+        1,
+        1,
+        1
+      ],
+      "observations": 262
+    }
+  },
+  "last_training_time": "2026-08-13T16:47:49.781291",
+  "arima_order": [
+    1,
+    1,
+    1
+  ]
+}
