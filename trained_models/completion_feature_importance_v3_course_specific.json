@@ -1,0 +1,47 @@
+[
+  {
+    "feature": "age",
+    "display_name": "Age",
+    "importance": 0.195504
+  },
+  {
+    "feature": "barangay",
+    "display_name": "Barangay",
+    "importance": 0.188615
+  },
+  {
+    "feature": "course_applied",
+    "display_name": "Course Applied",
+    "importance": 0.144032
+  },
+  {
+    "feature": "current_skill",
+    "display_name": "Current Skill",
+    "importance": 0.101655
+  },
+  {
+    "feature": "educational_attainment",
+    "display_name": "Educational Attainment",
+    "importance": 0.097448
+  },
+  {
+    "feature": "learner_classification",
+    "display_name": "Learner Classification",
+    "importance": 0.089218
+  },
+  {
+    "feature": "employment_status",
+    "display_name": "Employment Status",
+    "importance": 0.076756
+  },
+  {
+    "feature": "desired_career",
+    "display_name": "Desired Career",
+    "importance": 0.074156
+  },
+  {
+    "feature": "sex",
+    "display_name": "Sex",
+    "importance": 0.032616
+  }
+]

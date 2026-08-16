@@ -1,0 +1,110 @@
+{
+  "model_version": "v3_course_specific",
+  "model_type": "RandomForestClassifier",
+  "training_date": "2026-08-16T18:38:26.174227",
+  "dataset": {
+    "source": "historical_training_course_specific.csv",
+    "total_records": 13200,
+    "courses": [
+      "Bookkeeping NC II",
+      "Bread and Pastry NC II",
+      "Carpentry NC II",
+      "Computer Systems Servicing NC II",
+      "Construction Painting NC II",
+      "Cookery NC II",
+      "Driving NC II",
+      "Electrical Installation and Maintenance NC II",
+      "Electronic Products Assembly and Servicing NC II",
+      "HEO (Bulldozer) NC II",
+      "HEO (Forklift) NC II",
+      "HEO (Hydraulic Excavator) NC II",
+      "HEO (Wheel Loader) NC II",
+      "Landscape Installation and Maintenance (Softscape)",
+      "Machining NC I",
+      "Machining NC II",
+      "Masonry NC I",
+      "Masonry NC II",
+      "Organic Agriculture Production NC II",
+      "Shielded Metal Arc Welding NC I",
+      "Shielded Metal Arc Welding NC II",
+      "Trainers Methodology Level I"
+    ],
+    "course_count": 22,
+    "barangays": [
+      "Abuanan",
+      "Alianza",
+      "Atipuluan",
+      "Bacong",
+      "Bagroy",
+      "Balingasag",
+      "Binubuhan",
+      "Busay",
+      "Calumangan",
+      "Caridad",
+      "Dulao",
+      "Ilijan",
+      "Lag-asan",
+      "Ma-ao",
+      "Mailum",
+      "Malingin",
+      "Napoles",
+      "Pacol",
+      "Poblacion",
+      "Sagasa",
+      "Tabunan",
+      "Taloc"
+    ],
+    "barangay_count": 22,
+    "records_per_barangay": {
+      "min": 600,
+      "max": 600,
+      "mean": 600.0,
+      "is_balanced": true
+    }
+  },
+  "features": {
+    "feature_columns": [
+      "barangay",
+      "course_applied",
+      "age",
+      "sex",
+      "educational_attainment",
+      "employment_status",
+      "current_skill",
+      "desired_career",
+      "learner_classification"
+    ],
+    "categorical_columns": [
+      "barangay",
+      "course_applied",
+      "sex",
+      "educational_attainment",
+      "employment_status",
+      "current_skill",
+      "desired_career",
+      "learner_classification"
+    ],
+    "target_column": "training_outcome"
+  },
+  "hyperparameters": {
+    "n_estimators": 100,
+    "max_depth": 10,
+    "min_samples_leaf": 2,
+    "max_features": "sqrt",
+    "random_state": 42,
+    "class_weight": "balanced"
+  },
+  "evaluation": {
+    "test_size": 0.2,
+    "stratified_split": true,
+    "accuracy": 0.5739,
+    "precision": 0.6022,
+    "recall": 0.5495,
+    "f1_score": 0.5747,
+    "roc_auc": 0.6153
+  },
+  "class_distribution": {
+    "Graduate": 6913,
+    "Dropout": 6287
+  }
+}

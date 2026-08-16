@@ -1,0 +1,54 @@
+{
+  "accuracy": 0.5739,
+  "precision": 0.6022,
+  "recall": 0.5495,
+  "f1_score": 0.5747,
+  "roc_auc": 0.6153,
+  "confusion_matrix": [
+    [
+      755,
+      502
+    ],
+    [
+      623,
+      760
+    ]
+  ],
+  "class_labels": [
+    "Dropout",
+    "Graduate"
+  ],
+  "classification_report": {
+    "Dropout": {
+      "precision": 0.5478955007256894,
+      "recall": 0.6006364359586317,
+      "f1-score": 0.573055028462998,
+      "support": 1257.0
+    },
+    "Graduate": {
+      "precision": 0.6022187004754358,
+      "recall": 0.549530007230658,
+      "f1-score": 0.5746691871455577,
+      "support": 1383.0
+    },
+    "accuracy": 0.5738636363636364,
+    "macro avg": {
+      "precision": 0.5750571006005626,
+      "recall": 0.5750832215946449,
+      "f1-score": 0.5738621078042778,
+      "support": 2640.0
+    },
+    "weighted avg": {
+      "precision": 0.5763534496854997,
+      "recall": 0.5738636363636364,
+      "f1-score": 0.5739006275001117,
+      "support": 2640.0
+    }
+  },
+  "graduate_class_metrics": {
+    "precision": 0.6022187004754358,
+    "recall": 0.549530007230658,
+    "f1_score": 0.5746691871455577,
+    "support": 1383.0
+  }
+}
