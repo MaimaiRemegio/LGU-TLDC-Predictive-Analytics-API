@@ -8,10 +8,10 @@ services to avoid duplicated column lists across the codebase.
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MODEL_PATH = PROJECT_ROOT / "trained_models" / "completion_model.pkl"
-ENCODERS_PATH = PROJECT_ROOT / "trained_models" / "completion_encoders.pkl"
-METRICS_PATH = PROJECT_ROOT / "trained_models" / "completion_model_metrics.json"
-FEATURE_IMPORTANCE_PATH = PROJECT_ROOT / "trained_models" / "completion_feature_importance.json"
+MODEL_PATH = PROJECT_ROOT / "trained_models" / "completion_model_v3_course_specific.pkl"
+ENCODERS_PATH = PROJECT_ROOT / "trained_models" / "completion_encoders_v3_course_specific.pkl"
+METRICS_PATH = PROJECT_ROOT / "trained_models" / "completion_model_metrics_v3_course_specific.json"
+FEATURE_IMPORTANCE_PATH = PROJECT_ROOT / "trained_models" / "completion_feature_importance_v3_course_specific.json"
 
 FEATURE_COLUMNS = [
     "barangay",
