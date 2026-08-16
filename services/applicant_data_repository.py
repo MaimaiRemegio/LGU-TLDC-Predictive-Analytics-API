@@ -18,7 +18,7 @@ from services.completion_model_config import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATASET_PATH = PROJECT_ROOT / "datasets" / "historical_training.csv"
+DEFAULT_DATASET_PATH = PROJECT_ROOT / "datasets" / "historical_training_course_specific.csv"
 
 PROFILE_FIELDS = [
     "course_applied",
